@@ -94,6 +94,7 @@ let adminError = "";
 let formError = "";
 let unlocked = false;
 let busy = "";
+let store = null;
 
 const view = document.getElementById("view");
 
@@ -121,9 +122,17 @@ async function hashKey(value) {
   return Array.from(new Uint8Array(digest)).slice(0, 12).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
+async function waitForStorage() {
+  for (let i = 0; i < 40; i++) {
+    if (window.storage && typeof store.set === "function") return window.storage;
+    await new Promise(r => setTimeout(r, 150));
+  }
+  return null;
+}
+
 async function loadPublicKey() {
   try {
-    const r = await window.storage.get("pubkey", true);
+    const r = await store.get("pubkey", true);
     publicJwk = r && r.value ? JSON.parse(r.value) : null;
   } catch (e) {
     publicJwk = null;
@@ -152,9 +161,14 @@ function complete() {
 }
 
 async function boot() {
+  busy = "Starting up…";
+  render();
+  store = await waitForStorage();
+  busy = "";
+  if (!store) { mode = "nostore"; return render(); }
   await loadPublicKey();
   try {
-    const mine = await window.storage.get("submitted", false);
+    const mine = await store.get("submitted", false);
     if (mine && mine.value) { mode = "done"; return render(); }
   } catch (e) {}
   mode = "form";
@@ -164,6 +178,15 @@ async function boot() {
 function render() {
   if (busy) { view.innerHTML = `<p class="note">${esc(busy)}</p>`; return; }
   if (mode === "loading") { view.innerHTML = `<p class="note">Loading…</p>`; return; }
+  if (mode === "nostore") {
+    view.innerHTML = `
+      <header class="masthead">
+        <h1>This page cannot save answers here</h1>
+        <p>The storage this form needs is not available in the window you opened it in. Nothing typed here would be kept.</p>
+      </header>
+      <p class="note">Open it from the shared link rather than a downloaded copy, or use the Google Forms version instead.</p>`;
+    return;
+  }
   if (mode === "done") return renderDone();
   if (mode === "admin") return renderAdmin();
   renderForm();
@@ -256,7 +279,7 @@ async function submit() {
   }
 
   try {
-    const existing = await window.storage.list("resp:", true);
+    const existing = await store.list("resp:", true);
     const keys = (existing && existing.keys) || [];
     if (keys.includes(slot)) {
       sending = false;
@@ -267,7 +290,7 @@ async function submit() {
 
   try {
     const blob = await encryptPayload(payload);
-    await window.storage.set(slot, JSON.stringify(blob), true);
+    await store.set(slot, JSON.stringify(blob), true);
   } catch (e) {
     console.error(e);
     sending = false;
@@ -275,7 +298,7 @@ async function submit() {
     return render();
   }
 
-  try { await window.storage.set("submitted", payload.submitted_at, false); } catch (e) {}
+  try { await store.set("submitted", payload.submitted_at, false); } catch (e) {}
 
   mode = "done";
   sending = false;
@@ -308,7 +331,7 @@ async function setupKeys() {
   const pair = await crypto.subtle.generateKey({ name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["encrypt", "decrypt"]);
   const pub = await crypto.subtle.exportKey("jwk", pair.publicKey);
   const priv = await crypto.subtle.exportKey("jwk", pair.privateKey);
-  await window.storage.set("pubkey", JSON.stringify(pub), true);
+  await store.set("pubkey", JSON.stringify(pub), true);
   publicJwk = pub;
   download("efta-results-key.json", JSON.stringify(priv, null, 2), "application/json");
   busy = "";
@@ -317,12 +340,12 @@ async function setupKeys() {
 
 async function loadResults() {
   results = [];
-  const listing = await window.storage.list("resp:", true);
+  const listing = await store.list("resp:", true);
   const keys = (listing && listing.keys) || [];
   let failed = 0;
   for (const k of keys) {
     try {
-      const r = await window.storage.get(k, true);
+      const r = await store.get(k, true);
       if (r && r.value) results.push(await decryptPayload(JSON.parse(r.value)));
     } catch (e) { failed++; }
   }
