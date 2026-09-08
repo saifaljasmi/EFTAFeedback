@@ -285,6 +285,29 @@ function tally(field) {
   return q.options.map(o => [o, results.filter(r => r[field] === o).length]);
 }
 
+const SCALED = ["exam_match", "vs_self_study", "overall"];
+
+function scoreOf(field, value) {
+  const q = QUESTIONS.find(x => x.id === field);
+  const i = q.options.indexOf(value);
+  return i === -1 ? null : q.options.length - i;
+}
+
+function average(field) {
+  const scores = results.map(r => scoreOf(field, r[field])).filter(v => v !== null);
+  if (!scores.length) return null;
+  return { mean: scores.reduce((a, b) => a + b, 0) / scores.length, n: scores.length };
+}
+
+function answered(field) {
+  return results.filter(r => String(r[field] || "").trim() !== "").length;
+}
+
+function bar(mean) {
+  const filled = Math.round(mean);
+  return "\u2588".repeat(filled) + "\u2591".repeat(5 - filled);
+}
+
 function csvCell(v) {
   return `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
 }
@@ -317,9 +340,31 @@ function renderResults() {
       <button class="mini" id="refresh">Refresh</button>
       <button class="mini" id="out">Sign out</button>
     </div>
+    <div class="panel">
+      <h2>Summary</h2>
+      <table>
+        <tr><td>Submitted the form</td><td style="width:70px">${results.length}</td><td></td></tr>
+        <tr><td>Left a written answer</td><td>${answered("comments")}</td><td>${results.length ? Math.round(answered("comments") / results.length * 100) : 0}%</td></tr>
+        <tr><td>Phase 1 / 2 / 3</td><td colspan="2">${results.filter(r => r.phase === "Phase 1").length} / ${results.filter(r => r.phase === "Phase 2").length} / ${results.filter(r => r.phase === "Phase 3").length}</td></tr>
+      </table>
+    </div>
+    <div class="panel">
+      <h2>Averages</h2>
+      <p class="note">Each scale scores 5 for the best option down to 1 for the worst.</p>
+      <table>
+        <tr><th>Question</th><th style="width:90px">Average</th><th style="width:90px">Answered</th><th style="width:90px">Scale</th></tr>
+        ${SCALED.map(f => {
+          const a = average(f);
+          const q = QUESTIONS.find(x => x.id === f);
+          return `<tr><td>${esc(q.text)}</td><td>${a ? a.mean.toFixed(2) + " / 5" : "\u2014"}</td><td>${answered(f)}</td><td>${a ? bar(a.mean) : ""}</td></tr>`;
+        }).join("")}
+      </table>
+      <p class="note">The keep-or-remove question has no average because "Unsure" does not sit on a scale. Its split is below.</p>
+    </div>
     ${fields.map(f => `
       <div class="panel">
         <h2>${esc(QUESTIONS.find(q => q.id === f).text)}</h2>
+        <p class="note">${answered(f)} answered${SCALED.includes(f) && average(f) ? ` · average ${average(f).mean.toFixed(2)} / 5` : ""}</p>
         <table>
           ${tally(f).map(([o, n]) => `<tr><td>${esc(o)}</td><td style="width:56px">${n}</td><td>${results.length ? Math.round(n / results.length * 100) : 0}%</td></tr>`).join("")}
         </table>
