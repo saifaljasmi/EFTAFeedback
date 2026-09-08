@@ -1,23 +1,23 @@
-<div id="root">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exam preparation classes: what did you think?</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-
 <style>
-#root {
+:root {
   --paper: #EEF1F4;
   --ink: #14213A;
   --ink-soft: #55627A;
   --rule: #C7CFD9;
   --signal: #B0722A;
   --white: #FFFFFF;
-  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
-  color: var(--ink);
-  background: var(--paper);
-  padding: 0;
-  margin: 0;
 }
-#root * { box-sizing: border-box; }
+* { box-sizing: border-box; }
+body { font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif; color: var(--ink); background: var(--paper); margin: 0; }
 .wrap { max-width: 660px; margin: 0 auto; padding: 44px 20px 72px; }
 .masthead { border-bottom: 2px solid var(--ink); padding-bottom: 18px; margin-bottom: 30px; }
 .masthead h1 { font-size: 30px; line-height: 1.15; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 12px; }
@@ -44,20 +44,18 @@ textarea:focus { outline: 2px solid var(--signal); outline-offset: 1px; }
 .send:disabled { background: var(--rule); color: var(--ink-soft); cursor: not-allowed; }
 .note { font-size: 13px; line-height: 1.55; color: var(--ink-soft); margin: 14px 0 0; max-width: 56ch; }
 .linkish { background: none; border: none; padding: 0; font-family: inherit; font-size: 13px; color: var(--ink-soft); text-decoration: underline; cursor: pointer; }
-.done { text-align: left; padding: 60px 0; }
-.done h2 { font-size: 24px; font-weight: 600; margin: 0 0 12px; }
+.gate { padding: 40px 0; }
+.gate h2 { font-size: 22px; font-weight: 600; margin: 0 0 10px; }
 .panel { background: var(--white); border: 1px solid var(--rule); border-radius: 3px; padding: 18px; margin-top: 18px; }
 .panel h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; align-items: center; }
 .mini { background: var(--white); border: 1px solid var(--ink); color: var(--ink); border-radius: 3px; padding: 9px 15px; font-family: inherit; font-size: 14px; cursor: pointer; }
 .mini:hover { background: var(--ink); color: var(--white); }
-input[type=password] { border: 1px solid var(--rule); border-radius: 3px; padding: 10px 12px; font-family: inherit; font-size: 15px; background: var(--white); color: var(--ink); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
 th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
 th { font-weight: 600; }
 .scroll { overflow-x: auto; }
 .err { color: #8C2F2F; font-size: 14px; }
-.warn { border-left: 3px solid var(--signal); padding-left: 12px; }
 @media (max-width: 520px) {
   .q { grid-template-columns: 1fr; gap: 0; }
   .qnum { padding-top: 0; margin-bottom: 4px; }
@@ -67,12 +65,25 @@ th { font-weight: 600; }
   .opt { transition: background 120ms ease, border-color 120ms ease, color 120ms ease; }
 }
 </style>
+</head>
+<body>
+<div class="wrap" id="view"><p class="note">Loading…</p></div>
 
-<div class="wrap" id="view"></div>
-</div>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInAnonymously, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, doc, setDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-<script>
-const ADMIN_CODE = "EFTA-RESULTS";
+const firebaseConfig = {
+  apiKey: "AIzaSyCFkTBlggjf_0pb2PsXzMgHiBIekctbn08",
+  authDomain: "feedback-3ba3a.firebaseapp.com",
+  projectId: "feedback-3ba3a",
+  storageBucket: "feedback-3ba3a.firebasestorage.app",
+  messagingSenderId: "156742301476",
+  appId: "1:156742301476:web:c0e63854d973f34fea25b1"
+};
+
+const OWNER_UID = "PASTE_YOUR_UID_HERE";
 
 const QUESTIONS = [
   { id: "phase", text: "Which phase are you in?", options: ["Phase 1", "Phase 2", "Phase 3"] },
@@ -83,129 +94,75 @@ const QUESTIONS = [
   { id: "comments", text: "What would you keep, change or drop?", type: "text" }
 ];
 
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const view = document.getElementById("view");
+
+let user = null;
+let intent = "cadet";
+let mode = "loading";
 const answers = {};
 let name = "";
-let mode = "loading";
 let sending = false;
-let publicJwk = null;
-let privateKey = null;
+let error = "";
 let results = [];
-let adminError = "";
-let formError = "";
-let unlocked = false;
-let busy = "";
-let store = null;
-
-const view = document.getElementById("view");
 
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-function normal(s) {
-  return String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+function slug(value) {
+  return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-");
 }
 
-function b64(buf) {
-  const bytes = new Uint8Array(buf);
-  let s = "";
-  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-  return btoa(s);
-}
-
-function unb64(str) {
-  return Uint8Array.from(atob(str), c => c.charCodeAt(0));
-}
-
-async function hashKey(value) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(normal(value)));
-  return Array.from(new Uint8Array(digest)).slice(0, 12).map(b => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function waitForStorage() {
-  for (let i = 0; i < 40; i++) {
-    if (window.storage && typeof store.set === "function") return window.storage;
-    await new Promise(r => setTimeout(r, 150));
-  }
-  return null;
-}
-
-async function loadPublicKey() {
-  try {
-    const r = await store.get("pubkey", true);
-    publicJwk = r && r.value ? JSON.parse(r.value) : null;
-  } catch (e) {
-    publicJwk = null;
-  }
-}
-
-async function encryptPayload(payload) {
-  const pub = await crypto.subtle.importKey("jwk", publicJwk, { name: "RSA-OAEP", hash: "SHA-256" }, false, ["encrypt"]);
-  const aesKey = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt"]);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aesKey, new TextEncoder().encode(JSON.stringify(payload)));
-  const raw = await crypto.subtle.exportKey("raw", aesKey);
-  const ek = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, pub, raw);
-  return { ek: b64(ek), iv: b64(iv), ct: b64(ct) };
-}
-
-async function decryptPayload(blob) {
-  const raw = await crypto.subtle.decrypt({ name: "RSA-OAEP" }, privateKey, unb64(blob.ek));
-  const aesKey = await crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["decrypt"]);
-  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(blob.iv) }, aesKey, unb64(blob.ct));
-  return JSON.parse(new TextDecoder().decode(plain));
+function validName(value) {
+  return /^[A-Za-z][A-Za-z0-9 .'-]*[A-Za-z0-9]$/.test(String(value || "").trim());
 }
 
 function complete() {
-  return name.trim().length >= 2 && QUESTIONS.every(q => q.type === "text" ? true : !!answers[q.id]);
+  return validName(name) && QUESTIONS.every(q => q.type === "text" ? true : !!answers[q.id]);
 }
 
-async function boot() {
-  busy = "Starting up…";
-  render();
-  store = await waitForStorage();
-  busy = "";
-  if (!store) { mode = "nostore"; return render(); }
-  await loadPublicKey();
-  try {
-    const mine = await store.get("submitted", false);
-    if (mine && mine.value) { mode = "done"; return render(); }
-  } catch (e) {}
-  mode = "form";
-  render();
-}
-
-function render() {
-  if (busy) { view.innerHTML = `<p class="note">${esc(busy)}</p>`; return; }
-  if (mode === "loading") { view.innerHTML = `<p class="note">Loading…</p>`; return; }
-  if (mode === "nostore") {
-    view.innerHTML = `
-      <header class="masthead">
-        <h1>This page cannot save answers here</h1>
-        <p>The storage this form needs is not available in the window you opened it in. Nothing typed here would be kept.</p>
-      </header>
-      <p class="note">Open it from the shared link rather than a downloaded copy, or use the Google Forms version instead.</p>`;
+onAuthStateChanged(auth, async u => {
+  user = u;
+  if (!u) {
+    if (intent === "cadet") {
+      try { await signInAnonymously(auth); } catch (e) { error = e.message; mode = "form"; render(); }
+    }
     return;
   }
+  if (!u.isAnonymous && u.uid === OWNER_UID) { return loadResults(); }
+  if (!u.isAnonymous && u.uid !== OWNER_UID) {
+    error = "That account is not the organiser account.";
+    intent = "cadet";
+    await signOut(auth);
+    return;
+  }
+  if (localStorage.getItem("submitted")) { mode = "done"; return render(); }
+  mode = "form";
+  render();
+});
+
+function render() {
+  if (mode === "loading") { view.innerHTML = `<p class="note">Loading…</p>`; return; }
   if (mode === "done") return renderDone();
-  if (mode === "admin") return renderAdmin();
+  if (mode === "results") return renderResults();
   renderForm();
 }
 
 function renderForm() {
-  const ready = !!publicJwk;
   view.innerHTML = `
     <header class="masthead">
       <h1>Exam preparation classes: what did you think?</h1>
       <p>Answer honestly. One submission each.</p>
     </header>
-    ${ready ? "" : `<p class="note warn">This form is not open yet. Whoever set it up still needs to finish setup. Nothing you type now will be saved.</p>`}
     <div class="namebox">
       <label for="nm">Your name</label>
-      <p class="namehint">Your name is only used as proof that a real cadet answered and to stop the same person submitting twice. It is never shown next to your answers — results are reported as numbers and unattributed comments.</p>
-      <input id="nm" type="text" autocomplete="name" placeholder="First and last name" value="${esc(name)}">
+      <p class="namehint">Used only as proof that a real cadet answered and to stop the same person submitting twice. It is never shown next to your answers — results are reported as numbers and unattributed comments. There is no account and no login.</p>
+      <input id="nm" type="text" value="${esc(name)}" placeholder="First and last name">
     </div>
-    <div id="questions">
+    <div>
       ${QUESTIONS.map((q, i) => q.type === "text" ? `
         <section class="q">
           <div class="qnum">${i + 1}</div>
@@ -224,18 +181,16 @@ function renderForm() {
         </section>`).join("")}
     </div>
     <div class="foot">
-      <button class="send" id="send" ${complete() && ready && !sending ? "" : "disabled"}>${sending ? "Sending…" : "Send my answers"}</button>
-      <p class="note">Your answers are scrambled in your browser before they are stored. Only the person holding the results key can read them — not other cadets, not anyone who opens this page.</p>
-      <p class="note"><button class="linkish" id="toadmin">Results</button></p>
-      <p class="note err" id="formerr">${esc(formError)}</p>
+      <button class="send" id="send" ${complete() && !sending ? "" : "disabled"}>${sending ? "Sending…" : "Send my answers"}</button>
+      <p class="note">Answers go straight to the organiser. No other cadet can read them, and they cannot be changed or deleted afterwards.</p>
+      <p class="note"><button class="linkish" id="toresults">Organiser sign-in</button></p>
+      <p class="note err">${esc(error)}</p>
     </div>`;
 
-  const nm = document.getElementById("nm");
-  nm.addEventListener("input", e => {
+  document.getElementById("nm").addEventListener("input", e => {
     name = e.target.value;
-    document.getElementById("send").disabled = !(complete() && ready && !sending);
+    document.getElementById("send").disabled = !(complete() && !sending);
   });
-
   view.querySelectorAll(".opt").forEach(b => {
     b.addEventListener("click", () => {
       answers[b.dataset.q] = b.dataset.v;
@@ -245,74 +200,98 @@ function renderForm() {
       render();
     });
   });
-
   const ta = document.getElementById("ta-comments");
   if (ta) ta.addEventListener("input", e => { answers.comments = e.target.value; });
   document.getElementById("send").addEventListener("click", submit);
-  document.getElementById("toadmin").addEventListener("click", () => { mode = "admin"; formError = ""; render(); });
+  document.getElementById("toresults").addEventListener("click", ownerSignIn);
+}
+
+async function ownerSignIn() {
+  const email = window.prompt("Organiser email");
+  if (!email) return;
+  const password = window.prompt("Password");
+  if (!password) return;
+  intent = "owner";
+  error = "";
+  mode = "loading";
+  render();
+  try {
+    await signOut(auth);
+    await signInWithEmailAndPassword(auth, email.trim(), password);
+  } catch (e) {
+    intent = "cadet";
+    error = e && e.message ? e.message : "Sign-in failed.";
+    mode = "form";
+    render();
+    await signInAnonymously(auth);
+  }
 }
 
 async function submit() {
-  if (!complete() || sending || !publicJwk) return;
+  if (!complete() || sending || !user) return;
   sending = true;
-  formError = "";
+  error = "";
   render();
-
-  const payload = {
-    name: name.trim(),
-    submitted_at: new Date().toISOString(),
-    phase: answers.phase,
-    exam_match: answers.exam_match,
-    vs_self_study: answers.vs_self_study,
-    overall: answers.overall,
-    future: answers.future,
-    comments: (answers.comments || "").trim()
-  };
-
-  let slot;
   try {
-    slot = "resp:" + (await hashKey(name));
+    await setDoc(doc(db, "responses", slug(name)), {
+      name: name.trim(),
+      phase: answers.phase,
+      exam_match: answers.exam_match,
+      vs_self_study: answers.vs_self_study,
+      overall: answers.overall,
+      future: answers.future,
+      comments: (answers.comments || "").trim(),
+      submitted_at: new Date().toISOString()
+    });
+    localStorage.setItem("submitted", "1");
+    mode = "done";
   } catch (e) {
-    sending = false;
-    formError = "This browser blocked the scrambling step. Try a different browser.";
-    return render();
-  }
-
-  try {
-    const existing = await store.list("resp:", true);
-    const keys = (existing && existing.keys) || [];
-    if (keys.includes(slot)) {
-      sending = false;
-      formError = "That name has already been submitted. If this is a mistake, speak to whoever sent you the link.";
-      return render();
+    if (e && e.code === "permission-denied") {
+      error = "That name has already been submitted. If this is a mistake, speak to whoever sent you the link.";
+    } else {
+      error = e && e.message ? e.message : "That did not send.";
     }
-  } catch (e) {}
-
-  try {
-    const blob = await encryptPayload(payload);
-    await store.set(slot, JSON.stringify(blob), true);
-  } catch (e) {
-    console.error(e);
-    sending = false;
-    formError = "That did not send: " + (e && e.message ? e.message : "unknown error") + ". Try once more.";
-    return render();
   }
-
-  try { await store.set("submitted", payload.submitted_at, false); } catch (e) {}
-
-  mode = "done";
   sending = false;
   render();
 }
 
 function renderDone() {
   view.innerHTML = `
-    <div class="done">
+    <div class="gate">
       <h2>Sent. Thanks.</h2>
-      <p class="note">Your answers are recorded and scrambled. Each cadet submits once, so this page will stay on this screen.</p>
-      <p class="note"><button class="linkish" id="toadmin2">Results</button></p>
+      <p class="note">Your answers are recorded. Each cadet answers once.</p>
+      <p class="note"><button class="linkish" id="toresults2">Organiser sign-in</button></p>
     </div>`;
-  document.getElementById("toadmin2").addEventListener("click", () => { mode = "admin"; render(); });
+  document.getElementById("toresults2").addEventListener("click", ownerSignIn);
+}
+
+async function loadResults() {
+  mode = "loading";
+  render();
+  try {
+    const snap = await getDocs(collection(db, "responses"));
+    results = snap.docs.map(d => d.data()).sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1));
+    error = "";
+  } catch (e) {
+    error = e && e.message ? e.message : "Could not read the responses.";
+  }
+  mode = "results";
+  render();
+}
+
+function tally(field) {
+  const q = QUESTIONS.find(x => x.id === field);
+  return q.options.map(o => [o, results.filter(r => r[field] === o).length]);
+}
+
+function csvCell(v) {
+  return `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+}
+
+function toCSV() {
+  const cols = ["submitted_at", "phase", "exam_match", "vs_self_study", "overall", "future", "comments"];
+  return [cols.join(","), ...results.map(r => cols.map(c => csvCell(r[c])).join(","))].join("\r\n");
 }
 
 function download(fname, text, type) {
@@ -325,126 +304,7 @@ function download(fname, text, type) {
   URL.revokeObjectURL(url);
 }
 
-async function setupKeys() {
-  busy = "Making your results key…";
-  render();
-  const pair = await crypto.subtle.generateKey({ name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["encrypt", "decrypt"]);
-  const pub = await crypto.subtle.exportKey("jwk", pair.publicKey);
-  const priv = await crypto.subtle.exportKey("jwk", pair.privateKey);
-  await store.set("pubkey", JSON.stringify(pub), true);
-  publicJwk = pub;
-  download("efta-results-key.json", JSON.stringify(priv, null, 2), "application/json");
-  busy = "";
-  render();
-}
-
-async function loadResults() {
-  results = [];
-  const listing = await store.list("resp:", true);
-  const keys = (listing && listing.keys) || [];
-  let failed = 0;
-  for (const k of keys) {
-    try {
-      const r = await store.get(k, true);
-      if (r && r.value) results.push(await decryptPayload(JSON.parse(r.value)));
-    } catch (e) { failed++; }
-  }
-  results.sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1));
-  return failed;
-}
-
-function toCSV() {
-  const cols = ["submitted_at", "phase", "exam_match", "vs_self_study", "overall", "future", "comments"];
-  const cell = v => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
-  return [cols.join(","), ...results.map(r => cols.map(c => cell(r[c])).join(","))].join("\r\n");
-}
-
-function tally(field) {
-  const q = QUESTIONS.find(x => x.id === field);
-  return q.options.map(o => [o, results.filter(r => r[field] === o).length]);
-}
-
-function renderAdmin() {
-  if (!unlocked) {
-    view.innerHTML = `
-      <header class="masthead">
-        <h1>Results</h1>
-        <p>This part is for whoever is collecting the answers.</p>
-      </header>
-      <div class="row">
-        <input type="password" id="code" placeholder="Results code">
-        <button class="mini" id="unlock">Continue</button>
-        <button class="mini" id="back">Back</button>
-      </div>
-      <p class="err">${esc(adminError)}</p>`;
-    document.getElementById("unlock").addEventListener("click", () => {
-      const val = document.getElementById("code").value.trim();
-      if (val !== ADMIN_CODE) { adminError = "That code does not match."; return render(); }
-      adminError = "";
-      unlocked = true;
-      render();
-    });
-    document.getElementById("code").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("unlock").click(); });
-    document.getElementById("back").addEventListener("click", () => { mode = "form"; adminError = ""; render(); });
-    return;
-  }
-
-  if (!publicJwk) {
-    view.innerHTML = `
-      <header class="masthead">
-        <h1>Set up before you share the link</h1>
-        <p>This makes a results key. Your answers key stays on your device; the form only gets the half that scrambles.</p>
-      </header>
-      <div class="panel warn">
-        <p class="note" style="color:var(--ink)">A file called efta-results-key.json downloads to your device. Keep it. There is no copy anywhere else, and without it the responses cannot be read by anyone, including you.</p>
-      </div>
-      <div class="row">
-        <button class="mini" id="gen">Make the key and download it</button>
-        <button class="mini" id="back3">Back</button>
-      </div>
-      <p class="err">${esc(adminError)}</p>`;
-    document.getElementById("gen").addEventListener("click", async () => {
-      try { await setupKeys(); } catch (e) { busy = ""; adminError = "The key could not be made: " + (e && e.message ? e.message : "unknown error"); render(); }
-    });
-    document.getElementById("back3").addEventListener("click", () => { mode = "form"; render(); });
-    return;
-  }
-
-  if (!privateKey) {
-    view.innerHTML = `
-      <header class="masthead">
-        <h1>Results</h1>
-        <p>Load efta-results-key.json to unscramble the responses. The file stays on your device.</p>
-      </header>
-      <div class="row">
-        <input type="file" id="keyfile" accept="application/json,.json">
-        <button class="mini" id="back4">Back</button>
-      </div>
-      <p class="err">${esc(adminError)}</p>`;
-    document.getElementById("keyfile").addEventListener("change", async e => {
-      const file = e.target.files && e.target.files[0];
-      if (!file) return;
-      try {
-        const jwk = JSON.parse(await file.text());
-        privateKey = await crypto.subtle.importKey("jwk", jwk, { name: "RSA-OAEP", hash: "SHA-256" }, false, ["decrypt"]);
-        adminError = "";
-        busy = "Unscrambling responses…";
-        render();
-        const failed = await loadResults();
-        busy = "";
-        if (failed) adminError = failed + " response(s) could not be read with this key.";
-        render();
-      } catch (err) {
-        privateKey = null;
-        adminError = "That file is not a valid results key.";
-        busy = "";
-        render();
-      }
-    });
-    document.getElementById("back4").addEventListener("click", () => { mode = "form"; render(); });
-    return;
-  }
-
+function renderResults() {
   const fields = ["phase", "exam_match", "vs_self_study", "overall", "future"];
   view.innerHTML = `
     <header class="masthead">
@@ -453,9 +313,9 @@ function renderAdmin() {
     </header>
     <div class="row">
       <button class="mini" id="csv">Download CSV</button>
-      <button class="mini" id="copy">Copy CSV</button>
+      <button class="mini" id="roster">Download name list</button>
       <button class="mini" id="refresh">Refresh</button>
-      <button class="mini" id="back2">Back</button>
+      <button class="mini" id="out">Sign out</button>
     </div>
     ${fields.map(f => `
       <div class="panel">
@@ -473,37 +333,30 @@ function renderAdmin() {
       <p class="note">Names are left out here so this can be shared as it is.</p>
       <table>
         <tr><th>Time</th><th>Phase</th><th>Exam match</th><th>vs self-study</th><th>Overall</th><th>Future</th><th>Comments</th></tr>
-        ${results.map(r => `<tr><td>${esc(r.submitted_at.slice(0, 16).replace("T", " "))}</td><td>${esc(r.phase)}</td><td>${esc(r.exam_match)}</td><td>${esc(r.vs_self_study)}</td><td>${esc(r.overall)}</td><td>${esc(r.future)}</td><td>${esc(r.comments)}</td></tr>`).join("")}
+        ${results.map(r => `<tr><td>${esc((r.submitted_at || "").slice(0, 16).replace("T", " "))}</td><td>${esc(r.phase)}</td><td>${esc(r.exam_match)}</td><td>${esc(r.vs_self_study)}</td><td>${esc(r.overall)}</td><td>${esc(r.future)}</td><td>${esc(r.comments)}</td></tr>`).join("")}
       </table>
     </div>
     <div class="panel">
       <h2>Who has submitted</h2>
       <p class="note">Proof of attendance only. Keep this separate from the results above.</p>
       <table>
-        ${results.map(r => `<tr><td>${esc(r.name)}</td><td style="width:130px">${esc(r.submitted_at.slice(0, 10))}</td></tr>`).join("") || `<tr><td>Nobody yet</td></tr>`}
+        ${results.map(r => `<tr><td>${esc(r.name)}</td><td style="width:110px">${esc((r.submitted_at || "").slice(0, 10))}</td></tr>`).join("") || `<tr><td>Nobody yet</td></tr>`}
       </table>
-      <div class="row"><button class="mini" id="roster">Download name list</button></div>
     </div>
-    <p class="err">${esc(adminError)}</p>`;
+    <p class="err">${esc(error)}</p>`;
 
-  const cell = v => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+  document.getElementById("csv").addEventListener("click", () => download("exam-prep-responses.csv", toCSV(), "text/csv"));
   document.getElementById("roster").addEventListener("click", () => {
-    const csv = ["name,submitted_at", ...results.map(r => [cell(r.name), cell(r.submitted_at)].join(","))].join("\r\n");
-    download("efta-exam-prep-names.csv", csv, "text/csv");
+    const csv = ["name,submitted_at", ...results.map(r => [csvCell(r.name), csvCell(r.submitted_at)].join(","))].join("\r\n");
+    download("exam-prep-names.csv", csv, "text/csv");
   });
-  document.getElementById("csv").addEventListener("click", () => download("efta-exam-prep-responses.csv", toCSV(), "text/csv"));
-  document.getElementById("copy").addEventListener("click", async e => {
-    try { await navigator.clipboard.writeText(toCSV()); e.target.textContent = "CSV copied"; } catch (err) { e.target.textContent = "Copy blocked"; }
+  document.getElementById("refresh").addEventListener("click", loadResults);
+  document.getElementById("out").addEventListener("click", async () => {
+    intent = "cadet";
+    results = [];
+    await signOut(auth);
   });
-  document.getElementById("refresh").addEventListener("click", async () => {
-    busy = "Unscrambling responses…";
-    render();
-    try { await loadResults(); } catch (err) { adminError = "The responses could not be read."; }
-    busy = "";
-    render();
-  });
-  document.getElementById("back2").addEventListener("click", () => { mode = "form"; render(); });
 }
-
-boot();
 </script>
+</body>
+</html>
